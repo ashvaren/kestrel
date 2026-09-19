@@ -93,7 +93,7 @@ button { font:inherit; color:inherit; -webkit-tap-highlight-color:transparent; t
 </div>
 <script>
 // ===================== KESTREL STATION · DATA =====================
-const VERSION = '0.4';
+const VERSION = '0.5';
 const WORLD = 3000;            // metres, square
 const CELL = 3;                // pathfinding cell (m)
 const NC = WORLD / CELL;       // cells per side
@@ -314,7 +314,7 @@ class World {
       this.addBuilding(s, 22, -14, 16, 14, 4, 'house', { name: 'GUEST HOUSE', door: 'W' });
       this.addBuilding(s, -24, 16, 14, 12, 3.5, 'shed', { name: 'STORE', door: 'E' });
       if (r() < 0.8) this.addBuilding(s, 26, 18, 10, 10, 3, 'shed', { name: 'GENERATOR', door: 'N' });
-      s.posts = [[-36, 30], [36, -30], [0, 34], [30, 28]].map(p => rotPt(p[0], p[1], x, y, rot));
+      s.posts = [[0, 40], [36, -30], [-36, 30], [30, 28]].map(p => rotPt(p[0], p[1], x, y, rot));
       s.vehicles.push({ x: 0, y: 0, ...vehAt(this, s, 8, 22, rot + 0.3, 'pickup') });
       s.r = 70;
     } else if (type === 'cache') {
@@ -426,7 +426,7 @@ class Game {
     this.t = 20.5 * 3600; this.day = 1;            // game seconds; start 20:30 day 1
     this.people = []; this.nextId = 1; this.byId = new Map();
     this.log = []; this.events = []; this.craters = []; this.shots = []; this.fx = [];
-    this.team = { ops: [], state: 'base', order: null, roe: 'suppressed', lz: null, morale: 1, missions: 0, aboard: false, captives: [], items: [], charges: 0, demo: 0, med: 0, litter: 0 };
+    this.team = { ops: [], state: 'base', order: null, roe: 'suppressed', posture: 'patrol', fatigue: 0, frozen: 0, lz: null, morale: 1, missions: 0, aboard: false, captives: [], items: [], charges: 0, demo: 0, med: 0, litter: 0 };
     this.helo = { state: 'base', x: 1500, y: 3300, tx: 0, ty: 0, t: 0, task: null, eta: 0 };
     this.air = { gunship: { state: 'available', eta: 0, until: 0, ammo: { w105: 12, w40: 40, w30: 120 }, withdrawnUntil: 0 }, hellfire: 2, strikes: [], sanctions: [] };
     this.ledger = { score: 0, entries: [], sanctions: [] };
@@ -437,7 +437,7 @@ class Game {
       { id: 'checkpoint', name: 'Checkpoint', kind: 'neutralise', text: 'Optional. The checkpoint on the south road sends reinforcements to the compounds.', state: 'active' },
     ];
     this.stats = { hosKilled: 0, civKilled: 0, civWounded: 0, wia: 0, kia: 0, rounds: 0, strikes: 0, captured: 0 };
-    this.over = null; this.contactT = -999; this.lastReinf = {}; this.mission = null;
+    this.over = null; this.contactT = -999; this.lastReinf = {}; this.mission = null; this.hostility = 0; this.weather = { dust: 0, next: this.t + 3600 + this.r() * 7200 }; this.kestrel = { onStation: this.t, fuel: 6 * 3600, handover: 0 }; this.lastHeard = -999; this.lastDog = -999;
     this.spawn();
     this.setupTeam();
   }
@@ -450,7 +450,9 @@ class Game {
   radio(cs, text, kind) { this.log.push({ t: this.t, cs, text, kind: kind || 'radio' }); if (this.log.length > 60) this.log.shift(); this.events.push({ type: 'radio', cs, text, kind }); }
   lcs() { const L = this.leader && this.leader(); return L ? L.cs : 'ANVIL'; }
   say(cs, key) { if (cs === 'ANVIL 1') cs = this.lcs(); const L = RADIO_LINES[key]; this.radio(cs, L[Math.floor(this.r() * L.length)]); }
-  noise(x, y, rad, src) { this.events.push({ type: 'noise', x, y, rad }); for (const p of this.people) { if (p.dead || p.down) continue; const d = dist(p.x, p.y, x, y); if (d > rad) continue; if (p.kind === 'hos') this.alertSite(p.site, x, y, 'noise'); else if (p.kind === 'civ' && !p.hvt && !p.source) this.flee(p, x, y); } }
+  noise(x, y, rad, src) { this.events.push({ type: 'noise', x, y, rad }); let heard = null; for (const p of this.people) { if (p.dead || p.down) continue; const d = dist(p.x, p.y, x, y); if (d > rad) continue; if (p.kind === 'hos') { const st = this.site(p.site); if (d > rad * 0.5 || (src === 'helo' && d > 250)) { if (!st.wary) { st.wary = true; st.waryT = this.t; if (st.compromisedAt < 0 && st.type !== 'village' && st.type !== 'market') heard = st; } continue; } if (st.compromisedAt < 0 && st.type !== 'village' && st.type !== 'market') heard = st; this.alertSite(p.site, x, y, 'noise'); } else if (p.kind === 'civ' && !p.hvt && !p.source) { this.flee(p, x, y); if (rad >= 300 && this.light() > 0.3 && !p.inside) this.reported(p); } }
+    if (heard && src !== 'helo' && this.team.state === 'ground' && this.t - this.lastHeard > 30) { this.lastHeard = this.t; this.radio('KESTREL', 'That was heard. Movement at ' + heard.name + '.', 'warn'); } }
+  reported(p) { if (this.t - (this.lastReport || -999) < 300) return; this.lastReport = this.t; this.timers = this.timers || []; this.timers.push({ at: this.t + 120 + this.r() * 120, type: 'report' }); }
   alertSite(sid, x, y, why) { const s = this.site(sid); if (!s) return; if (s.compromisedAt < 0) { s.compromisedAt = this.t; if (this.team.state === 'ground') this.radio('KESTREL', s.name + ' is awake. Movement at the buildings.', 'warn'); } s.alert = 1; s.lastX = x; s.lastY = y; }
   // ---------- spawn ----------
   spawn() {
@@ -507,6 +509,7 @@ class Game {
       else { T.order.phase = 'todoor'; this.pathTeam(target[0], target[1]); this.radio(this.lcs(), 'Moving to ' + b.name.toLowerCase() + '.'); } }
     else if (o.type === 'suppress') { T.order.until = this.t + 20; this.radio('ANVIL 3', 'Suppressing.'); }
     else if (o.type === 'capture') { const p = this.byId.get(o.pid); if (!p) return false; this.pathTeam(p.x, p.y); this.radio(this.lcs(), 'Moving to grab him.'); }
+    else if (o.type === 'takedown') { const p = this.byId.get(o.pid); if (!p || p.dead) return false; T.posture = 'stealth'; this.pathTeam(p.x, p.y); this.radio(this.lcs(), 'Moving on the sentry. Quiet.'); }
     else if (o.type === 'demo') { const b = this.bld(o.bld); this.pathTeam(b.dout[0], b.dout[1]); T.order.phase = 'todoor'; this.radio('ANVIL 2', 'Moving to set the demolition charge.'); }
     return true;
   }
@@ -519,7 +522,7 @@ class Game {
   step(dt) {
     if (this.over) return; this.t += dt; this.events.length = 0;
     const tick = Math.floor(this.t / 1) !== Math.floor((this.t - dt) / 1); // once per game second
-    this.stepHelo(dt); this.stepAir(dt);
+    this.stepHelo(dt); this.stepAir(dt); if (tick) this.stepSensor();
     for (const p of this.people) { if (p.dead) continue; if (p.kind === 'op') continue; if (p.kind === 'hos') this.stepHostile(p, dt, tick); else this.stepCiv(p, dt, tick); this.movePerson(p, dt); }
     this.stepTeam(dt, tick);
     if (tick) { this.stepSites(); this.checkTargets(); this.checkMissionEnd(); }
@@ -530,6 +533,7 @@ class Game {
     if (p.inside || p.dead || p.down || p.carried) return;
     if (!p.path || p.pi >= p.path.length) { p.path = null; return; }
     let budget = p.speed * dt * (p.sup > 0.5 ? 0.5 : 1) * (p.kind === 'civ' && p.state === 'flee' ? 2.2 : 1) * (p.carrying ? 0.55 : 1) * (this.world.cell(p.x, p.y) === T_TREE ? 0.7 : 1);
+    if (p.kind === 'op') { const T = this.team; if (T.frozen > 0) return; budget *= T.posture === 'stealth' ? 0.5 : T.posture === 'rush' ? 1.35 : 1; budget *= T.fatigue > 0.7 ? 0.85 : 1; T.walked = (T.walked || 0) + budget; }
     while (budget > 0 && p.pi < p.path.length) { const [tx, ty] = p.path[p.pi]; const d = dist(p.x, p.y, tx, ty); if (d <= budget) { p.x = tx; p.y = ty; p.pi++; budget -= d; } else { p.facing = Math.atan2(ty - p.y, tx - p.x); p.x += (tx - p.x) / d * budget; p.y += (ty - p.y) / d * budget; budget = 0; } }
     if (p.pi >= p.path.length) { p.path = null; this.arrived(p); }
   }
@@ -567,9 +571,10 @@ class Game {
     if (!tick) { if (p.state === 'fight' && p.target) this.hostileFire(p, dt); return; }
     const r = this.r, h = this.hour();
     // perception
+    if (!p.inside && p.state !== 'fight') this.scan(p);
     if (this.team.state === 'ground' && !p.inside) this.perceive(p);
     if (p.inside) { if (alerted) { if (p.state !== 'window' && r() < 0.35) { this.exit(p); p.state = 'fight'; p.next = this.t + 2; } else if (p.state !== 'window') { p.state = 'window'; } if (p.state === 'window') this.windowFight(p); return; }
-      if (this.t < p.next) return; p.next = this.t + 600 + r() * 1800; if (p.sentry || (h >= 6 && h < 22 && r() < 0.3)) { this.exit(p); const post = s.posts[p.post % Math.max(1, s.posts.length)] || [s.x, s.y]; this.goTo(p, post[0] + (r() - .5) * 6, post[1] + (r() - .5) * 6, 'topost'); p.next = this.t + 30; } return; }
+      if (this.t < p.next) return; p.next = this.t + 600 + r() * 1800; if (p.sentry || s.wary || (h >= 6 && h < 22 && r() < 0.3)) { this.exit(p); const post = s.posts[p.post % Math.max(1, s.posts.length)] || [s.x, s.y]; this.goTo(p, post[0] + (r() - .5) * 6, post[1] + (r() - .5) * 6, 'topost'); p.next = this.t + 30; } return; }
     if (alerted || p.state === 'fight' || p.state === 'search') { this.hostileFightLogic(p, s); return; }
     // routine
     if (this.t < p.next) return;
@@ -579,10 +584,17 @@ class Game {
     const posts = s.posts.length ? s.posts : [[s.x, s.y]]; const post = posts[Math.floor(r() * posts.length)]; this.goTo(p, post[0] + (r() - .5) * 8, post[1] + (r() - .5) * 8, 'patrol'); p.next = this.t + 40 + r() * 120;
   }
   perceive(p) {
-    const L = this.light(); const base = (60 + L * 130) * this.diff.hosSee * (1 + p.alert * 0.4) * (this.site(p.site).compromisedAt >= 0 ? 1.3 : 1);
-    for (const o of this.ops()) { if (o.inside || o.dead) continue; const d = dist(p.x, p.y, o.x, o.y); const moving = o.path ? 1.25 : 0.7; const inTree = this.world.cell(o.x, o.y) === T_TREE ? 0.6 : 1; const rng = base * moving * inTree; if (d > rng) continue; if (!this.world.los(p.x, p.y, o.x, o.y)) continue;
-      const chance = 0.25 + 0.75 * (1 - d / rng); if (this.r() < chance) { this.spotted(p, o); return; } else p.alert = Math.min(1, p.alert + 0.3); }
+    const L = this.light(); const s = this.site(p.site); const dust = this.weather.dust > 0 ? 0.6 : 1;
+    const base = (60 + L * 130) * this.diff.hosSee * (1 + p.alert * 0.4) * (s.compromisedAt >= 0 ? 1.3 : 1) * (s.wary ? 1.25 : 1) * (1 + this.hostility * 0.08) * dust;
+    const T = this.team; const post = (T.posture === 'stealth' ? 0.4 : T.posture === 'rush' ? 1.6 : 1) * (T.order && T.order.type === 'takedown' ? 0.6 : 1);
+    for (const o of this.ops()) { if (o.inside || o.dead) continue; const d = dist(p.x, p.y, o.x, o.y); const moving = o.path && T.frozen <= 0 ? (T.posture === 'stealth' ? 0.95 : 1.25) : 0.7; const c = this.world.cell(o.x, o.y); const terrain = c === T_TREE ? 0.55 : c === T_WADI ? 0.6 : c === T_FIELD ? 0.85 : 1; const cov = this.world.coverAt(o.x, o.y, p.x, p.y) > 0.5 ? 0.5 : 1;
+      // attention cone: sentries look where they face
+      let ang = Math.abs(((Math.atan2(o.y - p.y, o.x - p.x) - p.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI); const cone = ang < 0.8 ? 1 : ang < 1.6 ? 0.5 : 0.15;
+      const rng = base * moving * terrain * cov * post * cone; if (d > rng) continue; if (!this.world.los(p.x, p.y, o.x, o.y)) continue;
+      const chance = 0.2 + 0.8 * (1 - d / rng); if (this.r() < chance) { this.spotted(p, o); return; } else { p.alert = Math.min(1, p.alert + 0.3); if (T.posture === 'stealth' && T.frozen <= 0 && ang < 1.0 && d < rng * 1.6) { T.frozen = 6 + this.r() * 6; this.radio('KESTREL', 'Sentry looking your way. Anvil is frozen.', ''); } } }
   }
+  // sentries scan; everyone else faces where they walk
+  scan(p) { if (p.path) return; const s = this.site(p.site); if (p.scanBase === undefined) p.scanBase = Math.atan2(p.y - s.y, p.x - s.x); p.scanT = (p.scanT || 0) + 1; if (p.scanT % 25 === 0 && this.r() < 0.3) p.scanBase = this.r() * TAU; p.facing = p.scanBase + Math.sin(this.t * 0.12 + p.id) * 1.1; }
   spotted(p, o) { const s = this.site(p.site); const first = s.compromisedAt < 0; this.alertSite(p.site, o.x, o.y, 'seen'); p.state = 'fight'; p.target = o.id; p.lkx = o.x; p.lky = o.y; p.seen = this.t; if (first) { this.radio('KESTREL', 'Sentry has turned toward Anvil. You are compromised.', 'warn'); this.contactT = this.t; this.events.push({ type: 'compromised', site: s.id }); } }
   hostileFightLogic(p, s) {
     const r = this.r; // pick visible target
@@ -606,7 +618,7 @@ class Game {
   fireAt(shooter, target, fx, fy, shooterCover, dt) {
     const w = WPN[shooter.wpn]; shooter.lastFire = this.t; shooter.facing = Math.atan2(target.y - fy, target.x - fx); if (shooter.ammo !== 999) shooter.ammo--; if (shooter.kind === 'op') { this.stats.rounds++; if (this.mission) this.mission.rounds++; }
     const d = dist(fx, fy, target.x, target.y); const night = this.light() < 0.5;
-    let acc = w.acc * (shooter.kind === 'op' ? shooter.skill * 1.3 : this.diff.hosAcc * (night ? 0.5 : 1)) * clamp(1.3 - d / w.range, 0.15, 1.1) * (1 - shooter.sup * 0.6);
+    let acc = w.acc * (shooter.kind === 'op' ? shooter.skill * 1.3 * (this.team.fatigue > 0.7 ? 0.85 : 1) : this.diff.hosAcc * (night ? 0.5 : 1)) * clamp(1.3 - d / w.range, 0.15, 1.1) * (1 - shooter.sup * 0.6);
     const cov = target.inside ? 0.7 : this.world.coverAt(target.x, target.y, fx, fy) + (target.down ? 0.2 : 0) + (target.kind === 'op' && !target.path ? 0.15 : 0);
     acc *= (1 - clamp(cov, 0, 0.85)); if (shooter.kind === 'op' && night) acc *= 1.1;
     this.shots.push({ x0: fx, y0: fy, x1: target.x, y1: target.y, t: 0.3, life: 0.3, op: shooter.kind === 'op', sup: w.noise < 100 }); if (target.kind === 'op') { if (this.underFireT === undefined || this.t - this.underFireT > 4) this.events.push({ type: 'underfire' }); this.underFireT = this.t; } this.events.push({ type: 'shot', x: fx, y: fy, sup: w.noise < 100, lmg: w.rate > 2 });
@@ -634,6 +646,8 @@ class Game {
   // ---------- team ----------
   stepTeam(dt, tick) {
     const T = this.team; if (T.state !== 'ground') return; const ops = this.ops(); if (!ops.length) return; const L = this.leader(); const w = this.world;
+    if (T.frozen > 0) { T.frozen -= dt; if (T.frozen <= 0) { T.frozen = 0; } }
+    if (tick) { const moving = L && L.path && T.frozen <= 0; T.fatigue = clamp(T.fatigue + (moving ? (T.posture === 'rush' ? 0.0035 : T.posture === 'stealth' ? 0.0005 : 0.0012) : -0.003), 0, 1); if (T.fatigue > 0.75 && !T.fatigueWarned) { T.fatigueWarned = true; this.radio(this.lcs(), 'We need a breather. Accuracy is going to suffer.', 'warn'); } if (T.fatigue < 0.4) T.fatigueWarned = false; if (T.posture === 'rush' && moving && Math.floor(this.t) % 3 === 0) this.noise(L.x, L.y, 45, 'steps'); }
     // casualty timers
     for (const o of ops) { o.sup = Math.max(0, o.sup - dt * 0.25); if (o.down && !o.dead && !o.stable) { o.bleed -= dt; if (o.bleed <= 0) this.opKilled(o); } }
     // leader movement
@@ -671,6 +685,12 @@ class Game {
       const p = this.byId.get(o.pid); if (!p || p.dead) { T.order = { type: 'hold' }; return; } const d = dist(L.x, L.y, p.x, p.y);
       if (d < 4 && !p.inside) { const hostileNear = this.people.some(h => h.kind === 'hos' && !h.dead && !h.down && dist(h.x, h.y, p.x, p.y) < 25); if (!hostileNear) { o.hold = (o.hold || 0) + 1; if (o.hold >= 4) this.capture(p); } }
       else if (!L.path || dist(L.tx, L.ty, p.x, p.y) > 6) this.pathTeam(p.x, p.y);
+    } else if (o.type === 'takedown') {
+      const p = this.byId.get(o.pid); if (!p || p.dead || p.down) { T.order = { type: 'hold' }; return; } const d = dist(L.x, L.y, p.x, p.y); const s = this.site(p.site);
+      if (p.state === 'fight' || (s.compromisedAt >= 0 && p.target)) { this.radio(this.lcs(), 'He\'s seen us. Going loud.'); T.order = { type: 'hold' }; return; }
+      const angT = Math.abs(((Math.atan2(L.y - p.y, L.x - p.x) - p.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (!p.inside && (d < 3 || (d < 7 && angT > 1.0))) { p.dead = true; p.state = 'dead'; p.path = null; this.stats.hosKilled++; if (this.mission) this.mission.hosKilled++; this.fx.push({ type: 'hit', x: p.x, y: p.y, t: 0.5 }); this.radio(this.lcs(), 'Sentry down. Quiet.', 'ok'); T.order = { type: 'hold' }; }
+      else if (!L.path || dist(L.tx, L.ty, p.x, p.y) > 4) this.pathTeam(p.x, p.y);
     } else if (o.type === 'suppress') { if (this.t > o.until) { T.order = { type: 'hold' }; this.radio('ANVIL 3', 'Ceasing fire.'); } else for (const h of this.people) if (h.kind === 'hos' && !h.dead && dist(h.x, h.y, o.x, o.y) < 25) h.sup = Math.min(1, h.sup + 0.35); }
     if (this.timers) for (let i = this.timers.length - 1; i >= 0; i--) { const tm = this.timers[i]; if (this.t >= tm.at) { this.timers.splice(i, 1); if (tm.type === 'demo') { const b = this.bld(tm.bld); this.explosion(b.cx, b.cy, 14, 1.2, 'demo'); this.noise(b.cx, b.cy, 1500); } } }
   }
@@ -704,7 +724,7 @@ class Game {
   opFire(o, dt) {
     const T = this.team; if (T.holdFire) return; const w = WPN[o.wpn]; if (this.t - o.lastFire < 1 / w.rate || o.ammo <= 0) return; const roe = T.roe;
     let best = null, bd = 1e9; for (const p of this.people) { if (p.kind !== 'hos' || p.dead || p.down) continue; if (p.inside && p.state !== 'window') continue; const d = dist(o.x, o.y, p.x, p.y); if (d > w.range || d > bd) continue; const compromised = this.site(p.site).compromisedAt >= 0; const threatening = p.target === o.id || (p.state === 'fight' && p.target);
-      if (roe === 'suppressed' && !threatening && !compromised && d > 30) continue; if (roe === 'contact' && !compromised && !threatening && d > 30) continue; if (!p.armed && !threatening) continue; if (roe !== 'free' && p.pid !== 'hos' && !threatening) continue;
+      if (roe === 'suppressed' && !threatening && !compromised) continue; if (roe === 'contact' && !compromised && !threatening && d > 30) continue; if (T.posture === 'stealth' && !threatening && !compromised) continue; if (!p.armed && !threatening) continue; if (roe !== 'free' && p.pid !== 'hos' && !threatening) continue;
       if (!p.inside && !this.world.los(o.x, o.y, p.x, p.y)) continue; bd = d; best = p; }
     if (!best) { if (T.order && T.order.type === 'suppress' && this.t < T.order.until && o.wpn === 'lmg') { o.lastFire = this.t; o.ammo -= 3; this.shots.push({ x0: o.x, y0: o.y, x1: T.order.x + (this.r() - .5) * 12, y1: T.order.y + (this.r() - .5) * 12, t: 0.3, life: 0.3, op: true }); this.noise(o.x, o.y, 500); } return; }
     if (this.contactT < this.t - 30) { this.say(o.cs, 'contact'); this.events.push({ type: 'contact' }); } this.contactT = this.t;
@@ -743,7 +763,12 @@ class Game {
     const w = this.world; for (const s of w.sites) { if (s.compromisedAt < 0) continue; if (this.t - s.compromisedAt > 2400) { s.compromisedAt = -1; s.alert = 0; continue; }
       // reinforcements from the checkpoint or another compound
       if (!s.reinfSent && this.team.state === 'ground' && (s.type === 'compound' || s.type === 'cache') && this.t - s.compromisedAt > 60) { s.reinfSent = true; const src = w.sites.filter(o => o !== s && (o.type === 'checkpoint' || o.type === 'compound') && this.people.some(p => p.kind === 'hos' && p.site === o.id && !p.dead && !p.down)).sort((a, b) => dist(a.x, a.y, s.x, s.y) - dist(b.x, b.y, s.x, s.y))[0]; if (src) { const delay = (240 + this.r() * 240) * this.diff.reinf; this.timers = this.timers || []; this.timers.push({ at: this.t + delay, type: 'reinf', from: src.id, to: s.id }); if (src.type === 'checkpoint') this.radio('KESTREL', 'Vehicle starting up at the checkpoint. Expect company in a few minutes.', 'warn'); else this.radio('KESTREL', 'Movement at ' + src.name + '. A vehicle is loading.', 'warn'); } } }
-    if (this.timers) for (let i = this.timers.length - 1; i >= 0; i--) { const tm = this.timers[i]; if (tm.type === 'reinf' && this.t >= tm.at) { this.timers.splice(i, 1); this.sendReinforcements(tm.from, tm.to); } }
+    for (const s of w.sites) if (s.wary && s.waryT && s.compromisedAt < 0 && this.t - s.waryT > 1200) { s.wary = false; }
+    for (const s of w.sites) { if (s.compromisedAt < 0 || s.escalated) continue; const age = this.t - s.compromisedAt; if (age > 180 && !s.phoned && (s.type === 'compound' || s.type === 'cache' || s.type === 'checkpoint')) { s.phoned = true; for (const o of w.sites) if (o !== s && (o.type === 'compound' || o.type === 'cache' || o.type === 'checkpoint') && !o.wary) o.wary = true; this.radio('KESTREL', 'Phones are lighting up. The other compounds are waking.', 'warn'); }
+      const Ld = this.leader(); if (age > 600 && this.team.state === 'ground' && Ld && dist(Ld.x, Ld.y, s.x, s.y) < 450 && (s.type === 'compound' || s.type === 'cache' || s.type === 'checkpoint')) { s.escalated = true; const src = w.sites.filter(o => o !== s && o.type !== s.type && (o.type === 'checkpoint' || o.type === 'compound' || o.type === 'cache') && this.people.some(p => p.kind === 'hos' && p.site === o.id && !p.dead && !p.down)).sort((a, b) => dist(a.x, a.y, s.x, s.y) - dist(b.x, b.y, s.x, s.y))[1]; if (src) { this.timers = this.timers || []; this.timers.push({ at: this.t + 120 * this.diff.reinf, type: 'reinf', from: src.id, to: s.id }); this.radio('KESTREL', 'Second vehicle loading at ' + src.name + '. Time on target is running out.', 'warn'); } } }
+    if (this.timers) for (let i = this.timers.length - 1; i >= 0; i--) { const tm = this.timers[i]; if (this.t < tm.at) continue; if (tm.type === 'reinf') { this.timers.splice(i, 1); this.sendReinforcements(tm.from, tm.to); } else if (tm.type === 'report') { this.timers.splice(i, 1); const L = this.leader(); if (!L || this.team.state !== 'ground') continue; const near = w.sites.filter(o => o.type === 'compound' || o.type === 'checkpoint' || o.type === 'cache').sort((a, b) => dist(a.x, a.y, L.x, L.y) - dist(b.x, b.y, L.x, L.y))[0]; if (near && !near.wary) { near.wary = true; near.waryT = this.t; this.radio('KESTREL', 'A villager has been on the phone. ' + near.name + ' is putting men out.', 'warn'); } } }
+    // dogs at farms and the village at night
+    if (this.team.state === 'ground' && this.light() < 0.5 && this.t - this.lastDog > 90) { const L = this.leader(); if (L) for (const st of w.sites) if ((st.type === 'farm' || st.type === 'village') && dist(L.x, L.y, st.x, st.y) < (st.type === 'farm' ? 45 : st.r * 0.7)) { this.lastDog = this.t; this.radio(this.lcs(), 'Dogs. They\'ve got our scent.', 'warn'); this.noise(L.x, L.y, 140, 'dogs'); break; } }
     // intel: site watched
     for (const s of w.sites) { if (s.watched > 0) { const lv = s.watched > 600 ? 3 : s.watched > 240 ? 2 : s.watched > 60 ? 1 : 0; while (s.intel < lv) { s.intel++; this.intelReport(s, s.intel); } } }
   }
@@ -756,7 +781,8 @@ class Game {
   }
   // ---------- helo ----------
   stepHelo(dt) {
-    const h = this.helo; if (h.state === 'flying') { h.eta -= dt; const d = dist(h.x, h.y, h.tx, h.ty); const sp = 55 * dt; if (d > sp) { h.x += (h.tx - h.x) / d * sp; h.y += (h.ty - h.y) / d * sp; } else { h.x = h.tx; h.y = h.ty; } if (h.eta <= 0) { // arrive
+    const h = this.helo; if (h.state === 'flying' || h.state === 'holding') { if (Math.floor(this.t) !== Math.floor(this.t - dt)) this.noise(h.x, h.y, 750, 'helo'); }
+    if (h.state === 'flying') { h.eta -= dt; const d = dist(h.x, h.y, h.tx, h.ty); const sp = 55 * dt; if (d > sp) { h.x += (h.tx - h.x) / d * sp; h.y += (h.ty - h.y) / d * sp; } else { h.x = h.tx; h.y = h.ty; } if (h.eta <= 0) { // arrive
         const hot = this.people.some(p => p.kind === 'hos' && !p.dead && !p.down && dist(p.x, p.y, h.tx, h.ty) < 160 && this.site(p.site).compromisedAt >= 0);
         if (hot) { h.state = 'holding'; h.holdT = 0; this.radio('RANGER 3', 'LZ is hot. Ranger 3 holding off to the south. Clear it or give me another LZ.', 'warn'); } else this.heloLand(); } }
     else if (h.state === 'holding') { h.holdT += dt; if (Math.floor(h.holdT) % 20 === 0 && Math.floor(h.holdT) !== Math.floor(h.holdT - dt)) { const hot = this.people.some(p => p.kind === 'hos' && !p.dead && !p.down && dist(p.x, p.y, h.tx, h.ty) < 160 && this.site(p.site).compromisedAt >= 0); if (!hot) { this.radio('RANGER 3', 'LZ looks cold. Coming in.'); this.heloLand(); } } }
@@ -774,6 +800,12 @@ class Game {
     for (const o of ops) { o.dead = true; o.hidden = true; }
     this.team.ops = []; const hvt = this.byId.get(this.hvtId); if (hvt && hvt.captured) { if (hvt.aboard) { const tg = this.targets.find(t => t.id === 'hvt'); tg.state = 'extracted'; } else { hvt.captured = false; T.captives = []; const tg = this.targets.find(t => t.id === 'hvt'); tg.state = 'located'; this.radio('KESTREL', 'The detainee was not on the aircraft.', 'bad'); } }
     if (T.items.includes('ledger')) { const tg = this.targets.find(t => t.id === 'ledger'); tg.state = 'extracted'; }
+    // the valley learns
+    for (const s of this.world.sites) { if (s.compromisedAt >= 0 && (s.type === 'compound' || s.type === 'cache') && !s.raided) { s.raided = true; const houses = s.buildings.slice(); const home = houses[0]; const post = s.posts[0] || [s.x, s.y]; this.addPerson({ kind: 'hos', x: post[0], y: post[1], site: s.id, home, wpn: 'ak', sentry: true, post: 1 }); m.learned = (m.learned || []).concat(s.name + ' has set a night watch.'); } s.wary = false; s.phoned = false; s.escalated = false; }
+    this.hostility += m.civKilled * 1 + m.civWounded * 0.5;
+    // detainees: phones and questioning
+    for (const id of T.captives) { const c = this.byId.get(id); if (!c || !c.aboard) continue; if (c.hvt) { const tg = this.targets.find(t => t.id === 'cache'); if (tg.state === 'unconfirmed') { tg.state = 'confirmed'; m.leads = (m.leads || []).concat('Qasem\'s phone puts the weapons at the depot. Cache confirmed.'); } const cp = this.world.sites.find(x => x.type === 'checkpoint'); m.leads = (m.leads || []).concat('The ledger names the checkpoint commander. Reinforcements come from there.'); } else { const unk = this.world.sites.filter(x => (x.type === 'compound' || x.type === 'cache') && x.intel < 2); if (unk.length && this.r() < 0.6) { const st = unk[Math.floor(this.r() * unk.length)]; st.watched = Math.max(st.watched, 250); m.leads = (m.leads || []).concat('The detainee talked. Intelligence on ' + st.name + ' raised.'); } else m.leads = (m.leads || []).concat('The detainee gave nothing useful.'); } }
+    T.fatigue = 0; T.frozen = 0; T.posture = 'patrol';
     m.end = this.t; m.sanctions = this.applySanctions(); m.scoreDelta = this.ledger.score - m.score0; m.morale = T.morale;
     // fill roster from reserves
     while ((this.roster.filter(o => !o.kia).length < 4 || this.activeRoster().length < 3) && this.reserves.length) { const r = this.reserves.shift(); this.roster.push(r); this.radio('TOC', r.name + ' joins Anvil from the reserve.'); }
@@ -785,17 +817,28 @@ class Game {
   restAtBase() { // advance to 20:30 next day; injuries heal
     const target = Math.floor(this.t / DAY) * DAY + 20.5 * 3600 + (this.hour() >= 20.5 ? DAY : 0); this.t = target; this.day = Math.floor(this.t / DAY) + 1;
     for (const o of this.roster) if (o.injured > 0) o.injured--; this.team.morale = Math.min(1, this.team.morale + 0.1);
-    for (const s of this.world.sites) { s.compromisedAt = -1; s.alert = 0; s.reinfSent = false; }
+    for (const s of this.world.sites) { s.compromisedAt = -1; s.alert = 0; s.reinfSent = false; s.wary = false; s.phoned = false; s.escalated = false; }
+    this.kestrel.onStation = this.t; this.kestrel.handover = 0; this.weather.dust = 0;
     for (const p of this.people) { if (p.kind === 'op' || p.dead) continue; if (p.down && !p.hvt) { p.down = false; p.state = 'idle'; if (p.kind === 'hos') p.armed = true; } if (p.home !== null && !p.inside && !p.captured) { p.path = null; this.enter(p, p.home); } p.sup = 0; }
     this.air.gunship.state = 'available'; this.air.hellfire = Math.min(2, this.air.hellfire + 1);
   }
   checkTargets() { const tc = this.targets.find(t => t.id === 'checkpoint'); if (tc.state === 'active') { const cp = this.world.sites.find(s => s.type === 'checkpoint'); if (!this.people.some(p => p.kind === 'hos' && p.site === cp.id && !p.dead && !p.down)) { tc.state = 'neutralised'; this.radio('KESTREL', 'Checkpoint is quiet. No movement.', 'ok'); } } }
   checkMissionEnd() { if (this.team.state === 'ground' && this.ops().every(o => o.dead)) { this.team.state = 'base'; this.mission.end = this.t; this.mission.sanctions = this.applySanctions(); this.events.push({ type: 'debrief', m: this.mission }); this.lastDebrief = this.mission; this.mission = null; if (this.activeRoster().length < 2 && !this.reserves.length) this.over = { won: false, reason: 'wiped', text: 'Anvil is gone. There is no team left to send.' }; while ((this.roster.filter(o => !o.kia).length < 4 || this.activeRoster().length < 3) && this.reserves.length) this.roster.push(this.reserves.shift()); } }
   // ---------- observation (from the UI) ----------
+  stepSensor() {
+    const W = this.weather; if (W.dust > 0) { W.dust -= 1; if (W.dust <= 0) { W.dust = 0; this.radio('KESTREL', 'Picture is back. Sensor clear.', 'ok'); } } else if (this.t >= W.next) { W.next = this.t + 2400 + this.r() * 7200; if (this.r() < 0.35) { W.dust = 150 + this.r() * 240; this.radio('KESTREL', 'Dust across the valley. Picture degraded for a few minutes.', 'warn'); } }
+    const K = this.kestrel; if (this.training) return; if (K.handover > 0) { K.handover -= 1; if (K.handover <= 0) { K.handover = 0; K.onStation = this.t; this.radio('KESTREL', 'Kestrel 3 on station. Picture is back.', 'ok'); } return; }
+    const left = K.fuel - (this.t - K.onStation); if (left <= 0) { K.handover = 600 + this.r() * 300; this.radio('KESTREL', 'Kestrel 2 is bingo fuel. Handing over. Sensor gap of about ' + Math.round(K.handover / 60) + ' minutes.', 'bad'); } else if (left < 900 && !K.warned) { K.warned = true; this.radio('KESTREL', 'Kestrel 2 has fifteen minutes of fuel. Plan for a gap.', 'warn'); } else if (left >= 900) K.warned = false;
+  }
+  sensorBlind() { return this.kestrel.handover > 0; }
+  masked(p) { // hidden from the sensor under trees or the far eave of a building (drone looks from the south-west)
+    if (this.world.cell(p.x, p.y) === T_TREE) return true; const b = this.world.buildingAt(p.x, p.y, 2.5); if (b && (p.x - b.cx) > -b.w * 0.2 && (p.y - b.cy) < b.h * 0.2) return true; return false;
+  }
   observe(x0, y0, x1, y1, zoom, dt) { // sensor footprint in world coords; accrue PID and site intel
+    if (this.sensorBlind() || this.weather.dust > 0) return;
     const narrow = zoom >= 1.0, med = zoom >= 0.45;
     if (med) for (const s of this.world.sites) if (s.x > x0 && s.x < x1 && s.y > y0 && s.y < y1) s.watched += dt * (narrow ? 1.5 : 1);
-    if (narrow) for (const p of this.people) { if (p.dead || p.inside || p.pid || p.kind === 'op') continue; if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue; if (this.world.cell(p.x, p.y) === T_TREE) continue; p.obs += dt; if (p.obs > 4) { p.pid = p.armed ? 'hos' : 'civ'; } }
+    if (narrow) for (const p of this.people) { if (p.dead || p.inside || p.pid || p.kind === 'op') continue; if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue; if (this.masked(p)) continue; p.obs += dt; if (p.obs > 4) { p.pid = p.armed ? 'hos' : 'civ'; } }
   }
   // ---------- save ----------
   serialise() {
@@ -803,10 +846,10 @@ class Game {
       people: this.people.map(p => { const o = {}; for (const k in p) if (k !== 'path') o[k] = p[k]; return o; }),
       sites: w.sites.map(s => ({ alert: s.alert, compromisedAt: s.compromisedAt, intel: s.intel, watched: s.watched, reinfSent: !!s.reinfSent, gateOpen: !!s.gateOpen, veh: s.vehicles.map(v => ({ destroyed: v.destroyed, hot: v.hot })) })),
       blds: w.buildings.map(b => ({ dmg: b.dmg, destroyed: b.destroyed, cleared: b.cleared, items: b.items, occupants: b.occupants })),
-      breaches: w.breaches, craters: this.craters, team: this.team, helo: this.helo, air: this.air, ledger: this.ledger, targets: this.targets, stats: this.stats, roster: this.roster, reserves: this.reserves, mission: this.mission, timers: this.timers || [], log: this.log.slice(-20), over: this.over, contactT: this.contactT, lastDebrief: this.lastDebrief, training: this.training, tut: this.tut, sourceId: this.sourceId, sourceMet: !!this.sourceMet });
+      breaches: w.breaches, craters: this.craters, team: this.team, helo: this.helo, air: this.air, ledger: this.ledger, targets: this.targets, stats: this.stats, roster: this.roster, reserves: this.reserves, mission: this.mission, timers: this.timers || [], log: this.log.slice(-20), over: this.over, contactT: this.contactT, lastDebrief: this.lastDebrief, training: this.training, tut: this.tut, sourceId: this.sourceId, sourceMet: !!this.sourceMet, hostility: this.hostility, weather: this.weather, kestrel: this.kestrel, siteFlags: this.world.sites.map(x => ({ wary: !!x.wary, raided: !!x.raided, phoned: !!x.phoned, escalated: !!x.escalated })) });
   }
   static deserialise(json) {
-    const d = JSON.parse(json); const g = new Game(d.seed, d.diff, d.training); const w = g.world; g.tut = d.tut; g.sourceId = d.sourceId; g.sourceMet = d.sourceMet;
+    const d = JSON.parse(json); const g = new Game(d.seed, d.diff, d.training); const w = g.world; g.tut = d.tut; g.sourceId = d.sourceId; g.sourceMet = d.sourceMet; g.hostility = d.hostility || 0; if (d.weather) g.weather = d.weather; if (d.kestrel) g.kestrel = d.kestrel; if (d.siteFlags) d.siteFlags.forEach((f, i) => Object.assign(w.sites[i], f));
     g.t = d.t; g.day = d.day; g.nextId = d.nextId; g.hvtId = d.hvtId; g.people = d.people; g.byId = new Map(); for (const p of g.people) { p.path = null; g.byId.set(p.id, p); }
     d.sites.forEach((s, i) => { Object.assign(w.sites[i], { alert: s.alert, compromisedAt: s.compromisedAt, intel: s.intel, watched: s.watched, reinfSent: s.reinfSent, gateOpen: s.gateOpen }); s.veh.forEach((v, j) => Object.assign(w.sites[i].vehicles[j], v)); });
     d.blds.forEach((b, i) => Object.assign(w.buildings[i], b));
@@ -882,11 +925,16 @@ class Renderer {
       if (f < 0.35 && !s.sup) { const R = Math.max(3, z * 1.4) * (1 - f / 0.35); const gm = x.createRadialGradient(ax, ay, 0, ax, ay, R); gm.addColorStop(0, 'rgba(255,255,255,.95)'); gm.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gm; x.beginPath(); x.arc(ax, ay, R, 0, TAU); x.fill(); }
       x.restore(); }
     // people
-    for (const p of g.people) { if (p.inside || p.hidden || p.aboard) continue; if (!vis(p.x, p.y, 10)) continue; this.person(p, g); }
+    for (const p of g.people) { if (p.inside || p.hidden || p.aboard) continue; if (!vis(p.x, p.y, 10)) continue; if (p.kind !== 'op' && g.masked(p)) { if (z > 1.2 && !p.dead) { const [px, py] = this.w2s(p.x, p.y); x.fillStyle = 'rgba(200,204,208,.12)'; x.beginPath(); x.arc(px, py, Math.max(2, 0.6 * z), 0, TAU); x.fill(); } continue; } this.person(p, g); }
+    // sentry attention cones
+    if (z >= 1.0 && g.team.state === 'ground') for (const p of g.people) { if (p.kind !== 'hos' || p.dead || p.down || p.inside || p.pid !== 'hos' || !vis(p.x, p.y, 200)) continue; if (g.masked(p)) continue; const [px, py] = this.w2s(p.x, p.y); const R = (60 + g.light() * 130) * 0.9 * z; x.save(); const gr = x.createRadialGradient(px, py, 0, px, py, R); gr.addColorStop(0, 'rgba(224,80,63,.16)'); gr.addColorStop(1, 'rgba(224,80,63,0)'); x.fillStyle = gr; x.beginPath(); x.moveTo(px, py); x.arc(px, py, R, p.facing - 0.8, p.facing + 0.8); x.closePath(); x.fill(); x.strokeStyle = 'rgba(224,80,63,.25)'; x.lineWidth = 1; x.beginPath(); x.moveTo(px, py); x.lineTo(px + Math.cos(p.facing - 0.8) * R, py + Math.sin(p.facing - 0.8) * R); x.moveTo(px, py); x.lineTo(px + Math.cos(p.facing + 0.8) * R, py + Math.sin(p.facing + 0.8) * R); x.stroke(); x.restore(); }
     // helo
     if (g.helo.state !== 'base') this.helo(g.helo);
     // fx
     for (const f of g.fx) { const [px, py] = this.w2s(f.x, f.y); if (f.type === 'boom') { const k = 1 - f.t / 1.4; const rr = (f.r * (0.4 + k * 1.2)) * z; const gr = x.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, 'rgba(255,255,255,' + (1 - k) + ')'); gr.addColorStop(0.5, 'rgba(230,232,234,' + (0.7 * (1 - k)) + ')'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(px - rr, py - rr, rr * 2, rr * 2); } else if (f.type === 'hit') { x.fillStyle = 'rgba(255,255,255,' + f.t + ')'; x.beginPath(); x.arc(px, py, 1.5 + z, 0, TAU); x.fill(); } }
+    // sensor degradation
+    if (g.weather.dust > 0) { x.save(); x.globalAlpha = 0.35; x.fillStyle = '#6a6c6e'; x.fillRect(0, 0, W, H); x.globalAlpha = 0.5; for (let k = 0; k < 3; k++) { const n2 = this.noise[(this.frame + k) % 4]; const pat2 = x.createPattern(n2, 'repeat'); x.translate((this.frame * 91 + k * 77) % 256, (this.frame * 29 + k * 131) % 256); x.fillStyle = pat2; x.fillRect(-512, -512, W + 1024, H + 1024); } x.restore(); }
+    if (g.sensorBlind()) { x.save(); x.fillStyle = '#0d0e10'; x.fillRect(0, 0, W, H); x.globalAlpha = 0.9; for (let k = 0; k < 3; k++) { const n2 = this.noise[(this.frame * 3 + k) % 4]; const pat2 = x.createPattern(n2, 'repeat'); x.translate((this.frame * 131 + k * 53) % 256, (this.frame * 71 + k * 97) % 256); x.fillStyle = pat2; x.fillRect(-512, -512, W + 1024, H + 1024); } x.restore(); }
     // black hot
     if (this.blackHot) { x.globalCompositeOperation = 'difference'; x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over'; }
     // post: grain, scanlines, vignette
@@ -894,7 +942,7 @@ class Renderer {
     if (!this.vig) { const v = document.createElement('canvas'); v.width = W; v.height = H; const vx = v.getContext('2d'); const gr = vx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.8); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.55)'); vx.fillStyle = gr; vx.fillRect(0, 0, W, H); vx.fillStyle = 'rgba(0,0,0,.08)'; for (let yy = 0; yy < H; yy += 2) vx.fillRect(0, yy, W, 1); this.vig = v; }
     x.drawImage(this.vig, 0, 0);
     // overlays
-    this.overlays(g, ui);
+    if (!g.sensorBlind()) this.overlays(g, ui);
     this.hud(g, ui);
   }
   poly(poly, fill, stroke, lw) { const x = this.ctx; x.beginPath(); poly.forEach((p, i) => { const [px, py] = this.w2s(p[0], p[1]); i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.closePath(); if (fill) { x.fillStyle = fill; x.fill(); } if (stroke) { x.strokeStyle = stroke; x.lineWidth = lw || 1; x.stroke(); } }
@@ -987,7 +1035,10 @@ class Renderer {
       for (const sh of g.shots) if (!sh.op) { const [ax, ay] = this.w2s(sh.x0, sh.y0); if (ax < 0 || ax > W || ay < 0 || ay > H) { const cx = W / 2, cy = H / 2; const dx = ax - cx, dy = ay - cy; const d = Math.hypot(dx, dy) || 1; const ex = cx + dx / d * Math.min(W, H) * 0.42, ey = cy + dy / d * Math.min(W, H) * 0.42; x.save(); x.strokeStyle = RED; x.lineWidth = 2; x.beginPath(); x.moveTo(ex - dx / d * 14, ey - dy / d * 14); x.lineTo(ex, ey); x.stroke(); x.restore(); } } }
     // bottom strip
     const gs = g.air.gunship; const air = g.sanctioned('air2') ? 'AIR WITHDRAWN' : gs.state === 'onstation' ? 'ANGEL 61 ON STN ' + Math.max(0, Math.round((gs.until - g.t) / 60)) + ' MIN' : gs.state === 'inbound' ? 'ANGEL 61 ' + Math.ceil(gs.eta / 60) + ' MIN OUT' : gs.state === 'rtb' ? 'ANGEL 61 RTB' : g.t < gs.withdrawnUntil ? 'ANGEL 61 WITHDRAWN' : 'ANGEL 61 AVAILABLE';
-    this.txt(air + '   ·   HELLFIRE ' + g.air.hellfire + '   ·   DAY ' + g.day, m, b - 4, { s: 8, c: 'rgba(232,234,236,.8)' });
+    const K = g.kestrel; const fuelLeft = g.training ? 1 : clamp((K.fuel - (g.t - K.onStation)) / K.fuel, 0, 1); this.txt(air + '   ·   HF ' + g.air.hellfire + '   ·   FUEL ' + Math.round(fuelLeft * 100) + '%   ·   DAY ' + g.day, m, b - 4, { s: 8, c: fuelLeft < 0.25 ? AMB : 'rgba(232,234,236,.8)' });
+    if (g.sensorBlind()) { this.txt('NO PICTURE · KESTREL HANDOVER · ' + Math.ceil(K.handover / 60) + ' MIN', W / 2, H / 2 + 40, { a: 'center', s: 11, w: 600, c: AMB }); }
+    else if (g.weather.dust > 0) { x.save(); x.fillStyle = 'rgba(230,176,74,.85)'; x.fillRect(W / 2 - 78, b - 34, 156, 16); x.restore(); this.txt('SENSOR DEGRADED · DUST', W / 2, b - 22, { a: 'center', s: 9, w: 600, c: '#0a0c0f', sh: false }); }
+    if (g.team.state === 'ground' && g.team.frozen > 0) this.txt('FROZEN · SENTRY LOOKING', W / 2, t + 88, { a: 'center', s: 9.5, w: 600, c: GRN });
     const lightTxt = g.light() > 0.5 ? 'DAY' : g.light() > 0 ? 'TWILIGHT' : 'NIGHT'; this.txt(lightTxt, W - m, b - 4, { s: 8, a: 'right', c: 'rgba(232,234,236,.8)' });
     x.restore();
   }
@@ -1078,7 +1129,7 @@ class App {
       btn('Back', () => this.showMenu(this.game ? 'pause' : 'main'), 'ghost');
     } else if (name === 'help') {
       card.appendChild(el('div', 'h', 'How to play'));
-      card.appendChild(el('div', 'brief', `<b>The feed.</b> Drag to slew the sensor and flick to send it further; pinch to zoom about your fingers; double-tap to zoom in on a point. The ⌖ ANVIL button at the top jumps the sensor back to the team. Wide view shows the whole valley with site names; medium view builds intelligence on any site under the reticle; narrow view identifies people. Unknowns are amber. Once identified, hostiles are red and civilians white.<br><br><b>Intelligence.</b> Keep the sensor on a site and Kestrel reports what it sees over time. Use 4× and 16× to let the hours pass. Qasem sleeps somewhere. Find out where before you go in.<br><br><b>Inserting.</b> Tap INSERT, choose a landing zone by tapping the map, set the rules of engagement and the kit, then launch. Ranger 3 takes a few minutes. A landing zone near a compound wakes it.<br><br><b>Commanding Anvil.</b> MOVE and tap the ground. HOLD to stop. BREACH and tap a building: the team goes to it, blows the wall if it must, and clears it room by room. You cannot see inside; they report. SUPPRESS and tap an area. EXFIL and tap a landing zone.<br><br><b>Air.</b> Angel 61 must be requested and takes time to arrive. Tap AIR, pick a weapon, tap the aim point and read what is in the blast before you clear it. Kestrel carries two Hellfires of its own.<br><br><b>Wounded.</b> A hit operator bleeds. Hold and a teammate will apply a tourniquet; then he must be carried. Ranger will not land under fire.<br><br><b>The ledger.</b> Civilian harm and strikes without identification are recorded. At the end of each mission command responds: rules tighten, assets go, and eventually you are relieved. TASKS shows where you stand.<br><br><b>Saving.</b> The game saves itself at every debrief and when you pause. Continue picks up where you were.`));
+      card.appendChild(el('div', 'brief', `<b>The feed.</b> Drag to slew the sensor and flick to send it further; pinch to zoom about your fingers; double-tap to zoom in on a point. The ⌖ ANVIL button at the top jumps the sensor back to the team. Wide view shows the whole valley with site names; medium view builds intelligence on any site under the reticle; narrow view identifies people. Unknowns are amber. Once identified, hostiles are red and civilians white.<br><br><b>Intelligence.</b> Keep the sensor on a site and Kestrel reports what it sees over time. Use 4× and 16× to let the hours pass. Qasem sleeps somewhere. Find out where before you go in.<br><br><b>Inserting.</b> Tap INSERT, choose a landing zone by tapping the map, set the rules of engagement and the kit, then launch. Ranger 3 takes a few minutes. A landing zone near a compound wakes it.<br><br><b>Moving.</b> Three paces: Stealth (half speed, low, hard to see; the team freezes when a sentry looks their way), Patrol, and Rush (fast and loud). Sentries look where they face; Kestrel draws their cone of attention at narrow zoom. Approach from behind, through the wadi or the orchards, and you can reach a wall unseen. Select an identified sentry and tap Take down to remove him quietly.<br><br><b>Sound.</b> Suppressed shots carry tens of metres, a breaching charge or a rifle carries hundreds, and the helicopter is heard nearly a kilometre away. Dogs at farms and the village give you away at night. Kestrel tells you when something was heard.<br><br><b>Time on target.</b> Once a compound is awake, the others are phoned within minutes and men come by truck. Villagers who see you by day report it. A compound you have raided sets a night watch. Civilian harm makes every sentry sharper.<br><br><b>The sensor.</b> Thermal cannot see under roofs or trees, and the far eave of a building hides a man standing under it. Dust degrades the picture for a few minutes. Kestrel has fuel for about six hours and hands over to a relief with a gap of ten minutes or so; the HUD shows what is left.<br><br><b>Commanding Anvil.</b> MOVE and tap the ground. HOLD to stop. BREACH and tap a building: the team goes to it, blows the wall if it must, and clears it room by room. You cannot see inside; they report. SUPPRESS and tap an area. EXFIL and tap a landing zone.<br><br><b>Air.</b> Angel 61 must be requested and takes time to arrive. Tap AIR, pick a weapon, tap the aim point and read what is in the blast before you clear it. Kestrel carries two Hellfires of its own.<br><br><b>Wounded.</b> A hit operator bleeds. Hold and a teammate will apply a tourniquet; then he must be carried. Ranger will not land under fire.<br><br><b>The ledger.</b> Civilian harm and strikes without identification are recorded. At the end of each mission command responds: rules tighten, assets go, and eventually you are relieved. TASKS shows where you stand.<br><br><b>Saving.</b> The game saves itself at every debrief and when you pause. Continue picks up where you were.`));
       btn('Back', () => this.showMenu(this.game ? 'pause' : 'main'), 'ghost');
     } else if (name === 'pause') {
       card.appendChild(el('div', 'h', 'Paused'));
@@ -1113,7 +1164,7 @@ class App {
     card.appendChild(el('div', 'brief', lines.join('<br>')));
     const ev = m.events.filter(e => e.w !== 0); if (ev.length) { const L = el('div', 'sec'); card.appendChild(L); L.appendChild(el('div', 'k', 'ENTERED IN THE LEDGER · +' + Math.round(m.scoreDelta))); for (const e of ev) L.appendChild(el('div', 'led', '<span>' + e.text + '</span><span>' + (e.w > 0 ? '+' : '') + e.w + '</span>')); }
     if (m.sanctions && m.sanctions.length) { const S = el('div', 'sec'); card.appendChild(S); S.appendChild(el('div', 'k', 'FROM COMMAND')); for (const s of m.sanctions) S.appendChild(el('div', 'warn', s.text)); }
-    const co = []; if (m.kia) co.push('A replacement joins Anvil from the reserve. He has less experience.'); if (m.wia) co.push('The wounded need days to recover; rest at base to bring them back.'); if (m.civKilled) co.push('The village will be less forthcoming. Expect sentries to be more alert.'); if (!m.civKilled && !m.civWounded && m.hosKilled) co.push('No civilian harm. Command notes it.'); if (co.length) card.appendChild(el('div', 'sec', '<div class="k">CARRIES FORWARD</div>' + co.join('<br>')));
+    const co = []; if (m.learned) co.push(...m.learned); if (m.leads) co.push(...m.leads); if (m.kia) co.push('A replacement joins Anvil from the reserve. He has less experience.'); if (m.wia) co.push('The wounded need days to recover; rest at base to bring them back.'); if (m.civKilled) co.push('The village will be less forthcoming. Expect sentries to be more alert.'); if (!m.civKilled && !m.civWounded && m.hosKilled) co.push('No civilian harm. Command notes it.'); if (co.length) card.appendChild(el('div', 'sec', '<div class="k">CARRIES FORWARD</div>' + co.join('<br>')));
     if (g.over) { btn('Continue', () => this.showMenu('over'), 'primary'); return; }
     btn('Rest until tomorrow evening', () => { g.restAtBase(); this.save(); this.resume(); }, 'primary', 'Injuries heal, assets reset, the valley settles'); btn('Stay on station', () => { this.save(); this.resume(); }, 'ghost');
   }
@@ -1224,7 +1275,8 @@ class App {
       else if (ui.mode === 'breach') { if (ui.breach) { const b = g.bld(ui.breach.bld); const s = g.site(b.site); const outside = s.wallRect && L && !g.insideWallRect(s, L.x, L.y) && !s.gateOpen; h = '<div class="h">' + b.name + '</div><div class="small">' + (b.cleared ? 'Already cleared. ' : '') + (outside ? (T.charges ? 'Anvil is outside the wall: they will blow it and go through. ' : 'Anvil is outside the wall and has no charges: they will use the gate. ') : '') + 'You cannot see inside.</div><div class="row"><button class="chip' + (!ui.breach.explosive ? ' on' : '') + '" data-br="quiet">Quiet entry</button><button class="chip' + (ui.breach.explosive ? ' on' : '') + (T.charges ? '' : ' dim') + '" data-br="boom">Explosive · ' + T.charges + '</button>' + (T.demo && b.items.includes('cache') ? '<button class="chip red" data-br="demo">Set demolition</button>' : '') + '<button class="chip on" data-br="go">GO</button></div>'; } else h = '<div class="h">Breach</div><div class="small">Tap a building. Anvil will go to it, get through the wall if there is one, and clear it room by room.</div>'; }
       else if (ui.mode === 'suppress') h = '<div class="h">Suppress</div><div class="small">Tap an area. The LMG keeps heads down for twenty seconds. Loud.</div>';
       else if (ui.mode === 'exfil') h = '<div class="h">Exfil</div><div class="small">Tap a landing zone, or use the insertion LZ. Ranger 3 will not land with hostiles within 150 m.</div><div class="row"><button class="chip on" data-ex="go">CALL RANGER</button></div>';
-      else { h = '<div class="h">' + (g.underFireT !== undefined && g.t - g.underFireT < 4 ? '<span class="warn">TAKING FIRE</span> · ' : '') + st + ' · ' + ops.filter(p => !p.down).length + ' up' + (wia ? ' · <span class="warn">' + wia + ' WIA</span>' : '') + ' · ammo ' + ammo + '%</div>'; const s = L ? g.world.siteAt(L.x, L.y) : null; h += '<div class="small">' + (s && s.compromisedAt >= 0 ? '<span class="warn">COMPROMISED ' + fmtT(g.t - s.compromisedAt) + '</span> · ' : '') + 'ROE ' + ROE[T.roe].name.toLowerCase() + (T.captives.length ? ' · <span class="ok">' + T.captives.length + ' detainee' + (T.captives.length > 1 ? 's' : '') + '</span>' : '') + (T.items.length ? ' · <span class="ok">' + T.items.join(', ') + '</span>' : '') + '</div>' + roeChips(); if (ui.sel) h += this.selInfo(); }
+      else { h = '<div class="h">' + (g.underFireT !== undefined && g.t - g.underFireT < 4 ? '<span class="warn">TAKING FIRE</span> · ' : '') + (T.frozen > 0 ? '<span class="ok">FROZEN</span> · ' : '') + st + ' · ' + ops.filter(p => !p.down).length + ' up' + (wia ? ' · <span class="warn">' + wia + ' WIA</span>' : '') + ' · ammo ' + ammo + '%' + (T.fatigue > 0.7 ? ' · <span class="warn">tired</span>' : '') + '</div>';
+        h += '<div class="row"><span class="k" style="align-self:center">MOVE</span>' + [['stealth', 'Stealth'], ['patrol', 'Patrol'], ['rush', 'Rush']].map(([k, l]) => '<button class="chip' + (T.posture === k ? ' on' : '') + '" data-post="' + k + '">' + l + '</button>').join('') + '</div>'; const s = L ? g.world.siteAt(L.x, L.y) : null; h += '<div class="small">' + (s && s.compromisedAt >= 0 ? '<span class="warn">COMPROMISED ' + fmtT(g.t - s.compromisedAt) + '</span> · ' : '') + 'ROE ' + ROE[T.roe].name.toLowerCase() + (T.captives.length ? ' · <span class="ok">' + T.captives.length + ' detainee' + (T.captives.length > 1 ? 's' : '') + '</span>' : '') + (T.items.length ? ' · <span class="ok">' + T.items.join(', ') + '</span>' : '') + '</div>' + roeChips(); if (ui.sel) h += this.selInfo(); }
     } else if (ui.sheet === 'air') {
       const gs = g.air.gunship; const W = AIRWPN; let chips = '<div class="row">'; for (const k in W) { const w = W[k]; const avail = w.asset === 'kestrel' ? g.air.hellfire : gs.state === 'onstation' ? gs.ammo[k] : 0; chips += '<button class="chip red' + (ui.air.w === k ? ' on' : '') + (avail ? '' : ' dim') + '" data-aw="' + k + '">' + w.name + ' · ' + avail + '</button>'; } chips += '</div>';
       h = '<div class="h">Call for fire</div>' + chips;
@@ -1233,6 +1285,7 @@ class App {
     }
     c.innerHTML = h; this.fit();
     for (const b of c.querySelectorAll('[data-roe]')) b.onclick = () => { if (ui.sheet === 'insert') ui.insert.roe = b.dataset.roe; else { T.roe = b.dataset.roe; g.radio('TOC', 'Anvil, ROE is now ' + ROE[T.roe].name.toLowerCase() + '.'); this.renderRadio(); } this.updateCtx(); };
+    for (const b of c.querySelectorAll('[data-post]')) b.onclick = () => { T.posture = b.dataset.post; T.frozen = 0; g.radio('TOC', 'Anvil, move ' + (T.posture === 'stealth' ? 'stealthy. Slow and low.' : T.posture === 'rush' ? 'fast. Speed over noise.' : 'at patrol pace.')); this.renderRadio(); this.updateCtx(); };
     for (const b of c.querySelectorAll('[data-aw]')) b.onclick = () => { ui.air.w = b.dataset.aw; this.renderSheet(); };
     for (const b of c.querySelectorAll('[data-br]')) b.onclick = () => { const v = b.dataset.br; if (v === 'quiet') ui.breach.explosive = false; else if (v === 'boom') { if (T.charges) ui.breach.explosive = true; } else if (v === 'demo') { g.order({ type: 'demo', bld: ui.breach.bld }); this.setMode(null); return; } else if (v === 'go') { g.order({ type: 'breach', bld: ui.breach.bld, explosive: ui.breach.explosive }); this.audio.play('order'); this.setMode(null); return; } this.updateCtx(); };
     for (const b of c.querySelectorAll('[data-ex]')) b.onclick = () => { const pv = ui.preview; if (!pv) return; g.exfil({ x: pv.x, y: pv.y }); this.audio.play('order'); this.setMode(null); };
@@ -1240,12 +1293,12 @@ class App {
   }
   selInfo() {
     const g = this.game, ui = this.ui, T = g.team; const s = ui.sel; let h = '';
-    if (s.kind === 'person') { const p = g.byId.get(s.id); if (!p || p.dead) { ui.sel = null; return ''; } const who = p.kind === 'op' ? p.cs + ' · ' + p.name : p.captured ? (p.hvt ? 'Detainee · Qasem' : 'Detainee') : p.pid === 'hos' ? 'Hostile · ' + WPN[p.wpn].name.toLowerCase() : p.pid === 'civ' ? 'Unarmed · civilian' : 'Unknown · ' + (this.r.cam.zoom >= 1 ? 'identifying' : 'zoom in to identify'); h += '<div class="k">SELECTED</div><div>' + who + (p.down ? ' · <span class="warn">down' + (p.kind === 'op' ? (p.stable ? ', stable' : ', bleeding ' + fmtT(p.bleed)) : '') + '</span>' : '') + '</div><div class="row"><button class="chip" data-act="focus">Focus</button>' + (T.state === 'ground' && p.kind !== 'op' && !p.captured && (p.pid === 'civ' || p.down) ? '<button class="chip" data-act="capture">Capture</button>' : '') + '<button class="chip red" data-act="strike">Strike here</button><button class="chip" data-act="clear">Clear</button></div>'; }
+    if (s.kind === 'person') { const p = g.byId.get(s.id); if (!p || p.dead) { ui.sel = null; return ''; } const who = p.kind === 'op' ? p.cs + ' · ' + p.name : p.captured ? (p.hvt ? 'Detainee · Qasem' : 'Detainee') : p.pid === 'hos' ? 'Hostile · ' + WPN[p.wpn].name.toLowerCase() : p.pid === 'civ' ? 'Unarmed · civilian' : 'Unknown · ' + (this.r.cam.zoom >= 1 ? 'identifying' : 'zoom in to identify'); h += '<div class="k">SELECTED</div><div>' + who + (p.down ? ' · <span class="warn">down' + (p.kind === 'op' ? (p.stable ? ', stable' : ', bleeding ' + fmtT(p.bleed)) : '') + '</span>' : '') + '</div><div class="row"><button class="chip" data-act="focus">Focus</button>' + (T.state === 'ground' && p.kind !== 'op' && !p.captured && (p.pid === 'civ' || p.down) ? '<button class="chip" data-act="capture">Capture</button>' : '') + (T.state === 'ground' && p.pid === 'hos' && !p.down && !p.inside && g.site(p.site).compromisedAt < 0 ? '<button class="chip" data-act="takedown">Take down</button>' : '') + '<button class="chip red" data-act="strike">Strike here</button><button class="chip" data-act="clear">Clear</button></div>'; }
     else if (s.kind === 'bld') { const b = g.bld(s.id); const st = g.site(b.site); h += '<div class="k">SELECTED</div><div>' + b.name + ' · ' + st.name + (b.protected ? ' · <span class="ok">PROTECTED</span>' : '') + (b.destroyed ? ' · <span class="warn">destroyed</span>' : b.dmg > 0.15 ? ' · damaged' : '') + (b.cleared ? ' · cleared' : '') + (st.intel >= 3 ? ' · ' + b.occupants.length + ' inside' : '') + '</div><div class="row"><button class="chip" data-act="focus">Focus</button>' + (T.state === 'ground' && !b.destroyed ? '<button class="chip" data-act="breach">Breach</button>' : '') + '<button class="chip red" data-act="strike">Strike here</button><button class="chip" data-act="clear">Clear</button></div>'; }
     return h;
   }
   selAction(a) { const g = this.game, ui = this.ui; const s = ui.sel; if (!s) return; let x, y; if (s.kind === 'person') { const p = g.byId.get(s.id); if (!p) return; x = p.x; y = p.y; } else { const b = g.bld(s.id); x = b.cx; y = b.cy; }
-    if (a === 'focus') this.focus(x, y, Math.max(this.r.cam.zoom, 1.2)); else if (a === 'clear') { ui.sel = null; this.updateCtx(); } else if (a === 'strike') { ui.preview = { type: 'strike', x, y, w: ui.air.w }; this.setSheet('air'); } else if (a === 'capture') { g.order({ type: 'capture', pid: s.id }); this.audio.play('order'); ui.sel = null; this.updateCtx(); } else if (a === 'breach') { ui.mode = 'breach'; ui.breach = { bld: s.id, explosive: false }; ui.sel = null; this.renderSheet(); } }
+    if (a === 'focus') this.focus(x, y, Math.max(this.r.cam.zoom, 1.2)); else if (a === 'clear') { ui.sel = null; this.updateCtx(); } else if (a === 'strike') { ui.preview = { type: 'strike', x, y, w: ui.air.w }; this.setSheet('air'); } else if (a === 'takedown') { g.order({ type: 'takedown', pid: s.id }); this.audio.play('order'); ui.sel = null; this.renderSheet(); } else if (a === 'capture') { g.order({ type: 'capture', pid: s.id }); this.audio.play('order'); ui.sel = null; this.updateCtx(); } else if (a === 'breach') { ui.mode = 'breach'; ui.breach = { bld: s.id, explosive: false }; ui.sel = null; this.renderSheet(); } }
   assessStrike(x, y, w) { const g = this.game; const W = AIRWPN[w]; let hos = 0, unk = 0, civ = 0, prot = false, protName = '', fr = 9999; for (const p of g.people) { if (p.dead || p.kind === 'op') continue; const px = p.inside ? g.bld(p.bld).cx : p.x, py = p.inside ? g.bld(p.bld).cy : p.y; if (dist(px, py, x, y) > W.cde) continue; if (p.inside) { const s = g.site(p.site); if (s.intel >= 3 || s.protected) { if (p.kind === 'hos') hos++; else civ++; } else unk++; continue; } if (p.pid === 'hos') hos++; else if (p.pid === 'civ') civ++; else unk++; } for (const b of g.world.buildings) if (b.protected && polyDist(b.poly, x, y) < W.cde) { prot = true; protName = b.name; } for (const o of g.ops()) if (!o.hidden) fr = Math.min(fr, dist(o.x, o.y, x, y)); return { hos, unk, civ, prot, protName, fr }; }
   confirmStrike() { const g = this.game, ui = this.ui; const pv = ui.preview; if (!pv || pv.type !== 'strike') return; const err = g.callForFire(ui.air.w, pv.x, pv.y); if (err) { this.toast('TOC', err, 'warn'); return; } this.audio.play('order'); ui.preview = null; ui.mode = null; this.setSheet(g.team.state === 'ground' ? 'ground' : 'default'); }
   launch() { const g = this.game, ui = this.ui; if (!ui.insert.lz) return; if (g.sanctioned('helo')) ui.insert.lz = { x: 1450, y: 2750 }; if (!g.insert(ui.insert.lz, ui.insert.roe)) { this.toast('TOC', 'Not enough operators fit to go. Rest at base.', 'warn'); return; } ui.preview = { type: 'lz', x: ui.insert.lz.x, y: ui.insert.lz.y, name: 'HAWK' }; this.audio.play('order'); this.setSheet('default'); this.setSpeed(Math.min(this.speed, 4)); }
