@@ -13,7 +13,7 @@ button { font:inherit; color:inherit; -webkit-tap-highlight-color:transparent; t
 #top { position:absolute; top:0; left:0; right:0; height:var(--top); padding:env(safe-area-inset-top) 8px 0; box-sizing:border-box; display:flex; align-items:center; gap:6px; background:linear-gradient(#000d, #0000); pointer-events:none; }
 #top > * { pointer-events:auto; }
 .tb { background:#0a0c0fcc; border:1px solid var(--line); border-radius:8px; color:var(--txt); font-size:13px; font-weight:600; padding:6px 10px; line-height:1; }
-.tb.warn { border-color:var(--red); color:#ffb4ac; }
+.tb.warn { border-color:var(--red); color:#ffb4ac; } .tb.cyn { border-color:var(--cyn); color:var(--cyn); }
 #speed { display:flex; gap:0; background:#0a0c0fcc; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-left:auto; }
 #speed button { background:transparent; border:none; color:var(--mut); font-size:12px; font-weight:700; padding:7px 9px; font-family:"IBM Plex Mono", Menlo, monospace; }
 #speed button.on { background:var(--amb); color:#000; }
@@ -80,6 +80,7 @@ button { font:inherit; color:inherit; -webkit-tap-highlight-color:transparent; t
   <div id="top">
     <button class="tb" id="pausebtn">II</button>
     <button class="tb" id="tasksbtn">TASKS</button>
+    <button class="tb cyn" id="anvilbtn" hidden>⌖ ANVIL</button>
     <div id="speed"><button data-s="0">II</button><button data-s="1" class="on">1×</button><button data-s="4">4×</button><button data-s="16">16×</button></div>
   </div>
   <div id="stack"><div id="hint" hidden></div><div id="alerts"></div></div>
@@ -92,7 +93,7 @@ button { font:inherit; color:inherit; -webkit-tap-highlight-color:transparent; t
 </div>
 <script>
 // ===================== KESTREL STATION · DATA =====================
-const VERSION = '0.3';
+const VERSION = '0.4';
 const WORLD = 3000;            // metres, square
 const CELL = 3;                // pathfinding cell (m)
 const NC = WORLD / CELL;       // cells per side
@@ -1077,7 +1078,7 @@ class App {
       btn('Back', () => this.showMenu(this.game ? 'pause' : 'main'), 'ghost');
     } else if (name === 'help') {
       card.appendChild(el('div', 'h', 'How to play'));
-      card.appendChild(el('div', 'brief', `<b>The feed.</b> Drag to slew the sensor, pinch to zoom. Wide view shows the whole valley with site names; medium view builds intelligence on any site under the reticle; narrow view identifies people. Unknowns are amber. Once identified, hostiles are red and civilians white.<br><br><b>Intelligence.</b> Keep the sensor on a site and Kestrel reports what it sees over time. Use 4× and 16× to let the hours pass. Qasem sleeps somewhere. Find out where before you go in.<br><br><b>Inserting.</b> Tap INSERT, choose a landing zone by tapping the map, set the rules of engagement and the kit, then launch. Ranger 3 takes a few minutes. A landing zone near a compound wakes it.<br><br><b>Commanding Anvil.</b> MOVE and tap the ground. HOLD to stop. BREACH and tap a building: the team goes to it, blows the wall if it must, and clears it room by room. You cannot see inside; they report. SUPPRESS and tap an area. EXFIL and tap a landing zone.<br><br><b>Air.</b> Angel 61 must be requested and takes time to arrive. Tap AIR, pick a weapon, tap the aim point and read what is in the blast before you clear it. Kestrel carries two Hellfires of its own.<br><br><b>Wounded.</b> A hit operator bleeds. Hold and a teammate will apply a tourniquet; then he must be carried. Ranger will not land under fire.<br><br><b>The ledger.</b> Civilian harm and strikes without identification are recorded. At the end of each mission command responds: rules tighten, assets go, and eventually you are relieved. TASKS shows where you stand.<br><br><b>Saving.</b> The game saves itself at every debrief and when you pause. Continue picks up where you were.`));
+      card.appendChild(el('div', 'brief', `<b>The feed.</b> Drag to slew the sensor and flick to send it further; pinch to zoom about your fingers; double-tap to zoom in on a point. The ⌖ ANVIL button at the top jumps the sensor back to the team. Wide view shows the whole valley with site names; medium view builds intelligence on any site under the reticle; narrow view identifies people. Unknowns are amber. Once identified, hostiles are red and civilians white.<br><br><b>Intelligence.</b> Keep the sensor on a site and Kestrel reports what it sees over time. Use 4× and 16× to let the hours pass. Qasem sleeps somewhere. Find out where before you go in.<br><br><b>Inserting.</b> Tap INSERT, choose a landing zone by tapping the map, set the rules of engagement and the kit, then launch. Ranger 3 takes a few minutes. A landing zone near a compound wakes it.<br><br><b>Commanding Anvil.</b> MOVE and tap the ground. HOLD to stop. BREACH and tap a building: the team goes to it, blows the wall if it must, and clears it room by room. You cannot see inside; they report. SUPPRESS and tap an area. EXFIL and tap a landing zone.<br><br><b>Air.</b> Angel 61 must be requested and takes time to arrive. Tap AIR, pick a weapon, tap the aim point and read what is in the blast before you clear it. Kestrel carries two Hellfires of its own.<br><br><b>Wounded.</b> A hit operator bleeds. Hold and a teammate will apply a tourniquet; then he must be carried. Ranger will not land under fire.<br><br><b>The ledger.</b> Civilian harm and strikes without identification are recorded. At the end of each mission command responds: rules tighten, assets go, and eventually you are relieved. TASKS shows where you stand.<br><br><b>Saving.</b> The game saves itself at every debrief and when you pause. Continue picks up where you were.`));
       btn('Back', () => this.showMenu(this.game ? 'pause' : 'main'), 'ghost');
     } else if (name === 'pause') {
       card.appendChild(el('div', 'h', 'Paused'));
@@ -1150,7 +1151,8 @@ class App {
       this.autosaveT += real; if (this.autosaveT > 90) { this.autosaveT = 0; this.save(); }
       if (g.over && !this.menu) { this.save(); this.showMenu('over'); }
     }
-    if (this.frame % 30 === 0) this.fit();
+    if (this.frame % 30 === 0) { this.fit(); $('#anvilbtn').hidden = !(g.team.state === 'ground' || g.team.state === 'inserting'); }
+    if (this.fling) { const f = this.fling; this.r.cam.x -= f.vx * real / this.r.cam.zoom; this.r.cam.y -= f.vy * real / this.r.cam.zoom; this.r.clampCam(); const k = Math.pow(0.12, real); f.vx *= k; f.vy *= k; if (Math.hypot(f.vx, f.vy) < 20) this.fling = null; }
     this.r.draw(g, this.ui, real);
     if (this.frame++ % 15 === 0 && !this.paused) { this.updateCtx(); this.tickTut(); }
   }
@@ -1252,12 +1254,13 @@ class App {
     window.addEventListener('resize', () => { this.r.resize(); }); this.r.resize();
     $('#pausebtn').onclick = () => { if (!this.game) return; this.save(); this.showMenu('pause'); };
     $('#tasksbtn').onclick = () => { if (!this.game) return; this.showMenu('tasks'); };
+    $('#anvilbtn').onclick = () => { const g = this.game; if (!g) return; const L = g.leader(); if (L && g.team.state === 'ground') this.focus(L.x, L.y, Math.max(this.r.cam.zoom, 1.5)); else if (g.team.state === 'inserting' && g.team.lz) this.focus(g.team.lz.x, g.team.lz.y, Math.max(this.r.cam.zoom, 0.8)); };
     for (const b of $('#speed').children) b.onclick = () => { this.audio.init(); this.audio.resume(); this.setSpeed(+b.dataset.s); };
     const cv = this.cv; const ptrs = new Map(); let gesture = null, pinch = null;
     const P = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-    cv.addEventListener('pointerdown', (e) => { e.preventDefault(); this.audio.init(); this.audio.resume(); if (!this.game) return; cv.setPointerCapture(e.pointerId); const [x, y] = P(e); ptrs.set(e.pointerId, { x, y, sx: x, sy: y }); if (ptrs.size === 2) { const a = [...ptrs.values()]; pinch = { d: dist(a[0].x, a[0].y, a[1].x, a[1].y), zoom: this.r.cam.zoom }; gesture = 'pinch'; return; } gesture = 'tap'; });
-    cv.addEventListener('pointermove', (e) => { if (!this.game || !ptrs.has(e.pointerId)) return; const [x, y] = P(e); const p = ptrs.get(e.pointerId); if (gesture === 'pinch' && ptrs.size === 2) { p.x = x; p.y = y; const a = [...ptrs.values()]; const d = dist(a[0].x, a[0].y, a[1].x, a[1].y); this.r.cam.zoom = clamp(pinch.zoom * d / pinch.d, 0.12, 20); this.r.clampCam(); return; } const dx = x - p.x, dy = y - p.y; p.x = x; p.y = y; if (gesture === 'tap' && dist(x, y, p.sx, p.sy) > 8) gesture = 'pan'; if (gesture === 'pan') { this.r.cam.x -= dx / this.r.cam.zoom; this.r.cam.y -= dy / this.r.cam.zoom; this.r.clampCam(); } });
-    const up = (e) => { if (!ptrs.has(e.pointerId)) return; const [x, y] = P(e); ptrs.delete(e.pointerId); if (gesture === 'pinch') { if (!ptrs.size) gesture = null; return; } if (gesture === 'tap' && this.game && !this.paused) this.onTap(x, y); gesture = null; };
+    cv.addEventListener('pointerdown', (e) => { e.preventDefault(); this.audio.init(); this.audio.resume(); if (!this.game) return; cv.setPointerCapture(e.pointerId); const [x, y] = P(e); ptrs.set(e.pointerId, { x, y, sx: x, sy: y, t: performance.now(), vx: 0, vy: 0 }); this.fling = null; if (ptrs.size === 2) { const a = [...ptrs.values()]; pinch = { d: dist(a[0].x, a[0].y, a[1].x, a[1].y), zoom: this.r.cam.zoom }; gesture = 'pinch'; return; } gesture = 'tap'; });
+    cv.addEventListener('pointermove', (e) => { if (!this.game || !ptrs.has(e.pointerId)) return; const [x, y] = P(e); const p = ptrs.get(e.pointerId); if (gesture === 'pinch' && ptrs.size === 2) { p.x = x; p.y = y; const a = [...ptrs.values()]; const d = dist(a[0].x, a[0].y, a[1].x, a[1].y); const cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2; const [wx, wy] = this.r.s2w(cx, cy); this.r.cam.zoom = clamp(pinch.zoom * d / pinch.d, 0.12, 20); const [nx, ny] = this.r.s2w(cx, cy); this.r.cam.x += wx - nx; this.r.cam.y += wy - ny; this.r.clampCam(); return; } const dx = x - p.x, dy = y - p.y; const now = performance.now(); const dt = Math.max(1, now - p.t); p.vx = 0.7 * p.vx + 0.3 * dx / dt * 1000; p.vy = 0.7 * p.vy + 0.3 * dy / dt * 1000; p.t = now; p.x = x; p.y = y; if (gesture === 'tap' && dist(x, y, p.sx, p.sy) > 8) gesture = 'pan'; if (gesture === 'pan') { this.r.cam.x -= dx / this.r.cam.zoom; this.r.cam.y -= dy / this.r.cam.zoom; this.r.clampCam(); } });
+    const up = (e) => { if (!ptrs.has(e.pointerId)) return; const [x, y] = P(e); const p = ptrs.get(e.pointerId); ptrs.delete(e.pointerId); if (gesture === 'pinch') { if (!ptrs.size) gesture = null; return; } if (gesture === 'pan' && performance.now() - p.t < 60 && Math.hypot(p.vx, p.vy) > 150) this.fling = { vx: clamp(p.vx, -5000, 5000), vy: clamp(p.vy, -5000, 5000) }; if (gesture === 'tap' && this.game && !this.paused) { const now = performance.now(); if (this.lastTap && now - this.lastTap.t < 320 && dist(x, y, this.lastTap.x, this.lastTap.y) < 24) { this.lastTap = null; const [wx, wy] = this.r.s2w(x, y); this.r.cam.zoom = clamp(this.r.cam.zoom * 2.2, 0.12, 20); const [nx, ny] = this.r.s2w(x, y); this.r.cam.x += wx - nx; this.r.cam.y += wy - ny; this.r.clampCam(); } else { this.lastTap = { x, y, t: now }; this.onTap(x, y); } } gesture = null; };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('wheel', (e) => { e.preventDefault(); this.r.cam.zoom = clamp(this.r.cam.zoom * (e.deltaY < 0 ? 1.12 : 0.89), 0.12, 20); this.r.clampCam(); }, { passive: false });
     window.addEventListener('keydown', (e) => { if (!this.game) return; if (e.key === ' ') { this.setSpeed(this.speed ? 0 : 1); e.preventDefault(); } });
